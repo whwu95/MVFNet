@@ -1,0 +1,4 @@
+decord==0.3.2
+mmcv==0.4.3
+sklearn
+tensorboard
