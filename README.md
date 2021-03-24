@@ -1,5 +1,5 @@
 # MVFNet: Multi-View Fusion Network for Efficient Video Recognition (AAAI 2021)
-![1](mvfnet.png)  
+![1](./mvfnet.png)  
 
 
 ## Overview
