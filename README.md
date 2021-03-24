@@ -47,7 +47,7 @@ Please refer to [DATA](./data_process/DATASETS.md) for data preparation.
 ## Model Zoo
 
 | Architecture | Dataset | T x interval |  Top-1 Acc. | Pre-trained model |
-|:------------:|:-------------------:|:------------------:|:-----------------:|:--------------:|:--------------:|
+|:------------:|:-------------------:|:------------------:|:-----------------:|:--------------:|
 |     MVFNet-ResNet50    |     Kinetics-400    |        4x16       |   74.2%   |   [Download link](...) |
 |     MVFNet-ResNet50    |     Kinetics-400    |        8x8       |   76.0%   |   [Download link](...) |
 |     MVFNet-ResNet50    |     Kinetics-400    |        16x4       |   77.0%   |   [Download link](...) |
@@ -71,7 +71,7 @@ bash scripts/dist_test_recognizer.sh configs/MVFNet/K400/mvf_kinetics400_2d_rgb_
 ## Training
 This implementation supports multi-gpu, `DistributedDataParallel` training, which is faster and simpler. 
 
-- For example, to train TDN-ResNet50 on Kinetics400 with 8 gpus, you can run:
+- For example, to train MVFNet-ResNet50 on Kinetics400 with 8 gpus, you can run:
 
 ```sh
 bash scripts/dist_train_recognizer.sh configs/MVFNet/K400/mvf_kinetics400_2d_rgb_r50_dense.py 8
