@@ -1,5 +1,5 @@
 # MVFNet: Multi-View Fusion Network for Efficient Video Recognition (AAAI 2021)
-![1](./mvfnet.png)  
+![1](mvfnet.png)  
 
 
 ## Overview
@@ -36,24 +36,25 @@ cd pretrained
 sh download_imgnet.sh
 ```
 - Download K400 pre-trained models
-TODO
+
+Please refer to [Model Zoo](#model-zoo).
 
 
 ## Data Preparation
-Please refer to [DATA](./data_process/DATASETS.md) for data preparation.
+Please refer to [DATASETS.md](./data_process/DATASETS.md) for data preparation.
 
 
 
 ## Model Zoo
 
-| Architecture | Dataset | T x interval |  Top-1 Acc. | Pre-trained model |
-|:------------:|:-------------------:|:------------------:|:-----------------:|:--------------:|
-|     MVFNet-ResNet50    |     Kinetics-400    |        4x16       |   74.2%   |   [Download link](...) |
-|     MVFNet-ResNet50    |     Kinetics-400    |        8x8       |   76.0%   |   [Download link](...) |
-|     MVFNet-ResNet50    |     Kinetics-400    |        16x4       |   77.0%   |   [Download link](...) |
-|     MVFNet-ResNet101    |     Kinetics-400    |        4x16       |    76.0%  |   [Download link](...) |
-|     MVFNet-ResNet101    |     Kinetics-400    |        8x8       |    77.4%  |   [Download link](...) |
-|     MVFNet-ResNet101    |     Kinetics-400    |        16x4       |   78.4%   |   [Download link](...)|
+| Architecture | Dataset | T x interval |  Top-1 Acc. | Pre-trained model | Train log| Test log|
+|:------------:|:-------------------:|:------------------:|:-----------------:|:--------------:|:--------------:|:--------------:|
+|     MVFNet-ResNet50    |     Kinetics-400    |        4x16       |   74.2%   |   [Download link](https://github.com/whwu95/MVFNet/releases/download/v0.2/R50_4x16.pth) | [Log link](https://github.com/whwu95/MVFNet/releases/download/v0.2/R50_4x16_1080Ti_Train.log)| [Log link](https://github.com/whwu95/MVFNet/releases/download/v0.2/R50_4x16_Test.txt)|
+|     MVFNet-ResNet50    |     Kinetics-400    |        8x8       |   76.0%   |   [Download link](https://github.com/whwu95/MVFNet/releases/download/v0.2/R50_8x8.pth) | Miss| [Log link](https://github.com/whwu95/MVFNet/releases/download/v0.2/R50_8x8_Test.txt)|
+|     MVFNet-ResNet50    |     Kinetics-400    |        16x4       |   77.0%   |   [Download link](https://github.com/whwu95/MVFNet/releases/download/v0.2/R50_16x4.pth) | [Log link](https://github.com/whwu95/MVFNet/releases/download/v0.2/R50_16x4_P40_Train.log)| [Log link](https://github.com/whwu95/MVFNet/releases/download/v0.2/R50_16x4_Test.txt)|
+|     MVFNet-ResNet101    |     Kinetics-400    |        4x16       |    76.0%  |   [Download link](https://github.com/whwu95/MVFNet/releases/download/v0.2/R101_4x16.pth) | [Log link](.https://github.com/whwu95/MVFNet/releases/download/v0.2/R101_4x16_1080Ti_Train.log)| [Log link](https://github.com/whwu95/MVFNet/releases/download/v0.2/R101_4x16_Test.txt)|
+|     MVFNet-ResNet101    |     Kinetics-400    |        8x8       |    77.4%  |   [Download link](https://github.com/whwu95/MVFNet/releases/download/v0.2/R101_8x8.pth) | [Log link](https://github.com/whwu95/MVFNet/releases/download/v0.2/R101_8x8_P40_Train.log)| [Log link](https://github.com/whwu95/MVFNet/releases/download/v0.2/R101_8x8_Test.txt)|
+|     MVFNet-ResNet101    |     Kinetics-400    |        16x4       |   78.4%   |   [Download link](https://github.com/whwu95/MVFNet/releases/download/v0.2/R101_16x4.pth) | [Log link](.https://github.com/whwu95/MVFNet/releases/download/v0.2/R101_16x4_P40_Train.log)| [Log link](https://github.com/whwu95/MVFNet/releases/download/v0.2/R101_16x4_Test.txt)|
 
 
 
