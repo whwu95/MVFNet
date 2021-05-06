@@ -3,7 +3,7 @@ import os.path as osp
 
 import mmcv
 import numpy as np
-
+import math
 from ...utils import FileClient
 from ..builder import PIPELINES
 # from io import StringIO, BytesIO
@@ -33,6 +33,7 @@ class SampleFrames(object):
         self.num_clips = num_clips
         self.temporal_jitter = temporal_jitter
         self.sth_samples = sth_samples  # for test sth-sth
+        # self.decode_type = decode_type # ['rawframes', 'opencv', 'decord', 'pyav']
 
     def _sample_clips(self, num_frames):
         """Choose frame indices for the video in training phase.
@@ -95,15 +96,7 @@ class SampleFrames(object):
 
         return clip_offsets
 
-    def __call__(self, results):
-        if 'total_frames' not in results:
-            # TODO: find a better way to get the total frames number for video
-            video_reader = mmcv.VideoReader(results['filename'])
-            total_frames = len(video_reader)
-            results['total_frames'] = total_frames
-        else:
-            total_frames = results['total_frames']
-
+    def _get_frame_inds(self, total_frames, results):
         if results['test_mode']:
             clip_offsets = self._test_sample_clips(total_frames)
         else:
@@ -125,13 +118,29 @@ class SampleFrames(object):
 
         # if temporal_jitter, mabye out of range
         # frame_inds = np.mod(frame_inds, total_frames)
-        frame_inds = np.minimum(frame_inds, total_frames - 1)
+        frame_inds = np.minimum(frame_inds, total_frames - 1).astype(np.int)
+        return frame_inds
 
-        results['frame_inds'] = frame_inds.astype(np.int)
+
+
+    def __call__(self, results):
+        if 'total_frames' not in results:
+            # TODO: find a better way to get the total frames number for video
+            video_reader = mmcv.VideoReader(results['filename'])
+            # import decord
+            # video_reader = decord.VideoReader(results['filename'])
+            total_frames = len(video_reader)
+            results['total_frames'] = total_frames
+        else:
+            total_frames = results['total_frames']
+        
+        results['frame_inds'] = self._get_frame_inds(total_frames, results)
         results['clip_len'] = self.clip_len
         results['frame_interval'] = self.frame_interval
         results['num_clips'] = self.num_clips
+        results['sth_samples'] = self.sth_samples
         return results
+
 
 
 @PIPELINES.register_module
@@ -145,7 +154,7 @@ class PyAVDecode(object):
             apply multi thread processing.
     """
 
-    def __init__(self, multi_thread=False):
+    def __init__(self, multi_thread=True):
         self.multi_thread = multi_thread
 
     def __call__(self, results):
@@ -155,34 +164,30 @@ class PyAVDecode(object):
             raise ImportError('Please run "conda install av -c conda-forge" '
                               'or "pip install av" to install PyAV first.')
 
+        av.logging.set_level(5)
         container = av.open(results['filename'])
-
-        img_group = list()
-
         if self.multi_thread:
             container.streams.video[0].thread_type = 'AUTO'
         if results['frame_inds'].ndim != 1:
             results['frame_inds'] = np.squeeze(results['frame_inds'])
 
+        img_group = list()
         # set max indice to make early stop
         max_inds = max(results['frame_inds'])
         i = 0
         for frame in container.decode(video=0):
             if i > max_inds + 1:
                 break
-            img_group.append(frame.to_rgb().to_ndarray())
+            # some other formats gray16be, bgr24, rgb24
+            img_group.append(frame.to_ndarray(format='rgb24'))
+            # img_group.append(frame.to_rgb().to_ndarray())
             i += 1
 
-        img_group = np.array(img_group)
-        # the available frame in pyav may be less than its length,
-        # which may raise error
-        if len(img_group) <= max_inds:
-            results['frame_inds'] = np.mod(results['frame_inds'],
-                                           len(img_group))
+        container.close()
+        # the available frame in pyav may be less than its length, which may raise error            
+        results['img_group'] = [img_group[i % len(img_group)] for i in results['frame_inds']]     
+        results['ori_shape'] = results['img_group'][0].shape[:2]
 
-        img_group = img_group[results['frame_inds']]
-        results['img_group'] = img_group
-        results['ori_shape'] = img_group[0].shape
         return results
 
     def __repr__(self):
@@ -196,7 +201,11 @@ class DecordDecode(object):
     Decord: https://github.com/zhreshold/decord
     Required keys are "filename" and "frame_inds",
     added or modified keys are "img_group" and "ori_shape".
+    Attributes:
+        num_threads (int): multi thread processing.    
     """
+    def __init__(self, num_threads=0):
+        self.num_threads = num_threads
 
     def __call__(self, results):
         try:
@@ -204,20 +213,26 @@ class DecordDecode(object):
         except ImportError:
             raise ImportError(
                 'Please run "pip install decord" to install Decord first.')
-
-        container = decord.VideoReader(results['filename'])
-        img_group = list()
+        decord.logging.set_level(5)
+        container = decord.VideoReader(results['filename'], num_threads=self.num_threads)
 
         if results['frame_inds'].ndim != 1:
             results['frame_inds'] = np.squeeze(results['frame_inds'])
 
-        for frame_idx in results['frame_inds']:
-            cur_frame = container[frame_idx].asnumpy()
-            img_group.append(cur_frame)
-            # img_group.append(cur_frame[:, :, ::-1])
+        num_frames = len(container)  # decord num_frames
+        frame_inds = results['frame_inds']
+
+        # Generate frame index mapping in order
+        # frame_dict = {idx: container[idx % num_frames].asnumpy() for idx in np.unique(frame_inds)}
+        # img_group = [frame_dict[idx] for idx in frame_inds]
+
+        img_group = container.get_batch([idx % num_frames for idx in frame_inds]).asnumpy()
+        del container
 
         results['img_group'] = img_group
         results['ori_shape'] = img_group[0].shape
+        results['img_shape'] = img_group[0].shape
+
         return results
 
 
