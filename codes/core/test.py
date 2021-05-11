@@ -3,100 +3,75 @@ import os.path as osp
 import pickle
 import shutil
 import tempfile
-
 import mmcv
 import torch
 import torch.distributed as dist
 from mmcv.runner import get_dist_info
 
 
-def single_gpu_test(model, data_loader):
+def single_gpu_test(model, data_loader, save_vididx=False):
     """Test model with a single gpu.
-
     This method tests model with a single gpu and displays test progress bar.
-
-    Args:
-        model (nn.Module): Model to be tested.
-        data_loader (nn.Dataloader): Pytorch data loader.
-
-    Returns:
-        list: The prediction results.
     """
     model.eval()
     results = []
+    vids = []
     dataset = data_loader.dataset
     prog_bar = mmcv.ProgressBar(len(dataset))
     for i, data in enumerate(data_loader):
         with torch.no_grad():
             result = model(return_loss=False, return_numpy=False, **data)
         results.append(result)
-
+        if save_vididx:
+            vids.append(data['vid_idx'])
         # use the first key as main key to calculate the batch size
         batch_size = len(next(iter(data.values())))
         for _ in range(batch_size):
             prog_bar.update()
-    return results
+    if save_vididx:
+        return results, vids
+    else:
+        return results
 
 
-def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=True):
+def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=True, save_vididx=False):
     """Test model with multiple gpus.
-
     This method tests model with multiple gpus and collects the results
-    under two different modes: gpu and cpu modes. By setting 'gpu_collect=True'
-    it encodes results to gpu tensors and use gpu communication for results
-    collection. On cpu mode it saves the results on different gpus to 'tmpdir'
-    and collects them by the rank 0 worker.
-
-    Args:
-        model (nn.Module): Model to be tested.
-        data_loader (nn.Dataloader): Pytorch data loader.
-        tmpdir (str): Path of directory to save the temporary results from
-            different gpus under cpu mode. Default: None
-        gpu_collect (bool): Option to use either gpu or cpu to collect results.
-            Default: True
-
-    Returns:
-        list: The prediction results.
     """
     model.eval()
     results = []
+    vids = []
     dataset = data_loader.dataset
     rank, world_size = get_dist_info()
     if rank == 0:
         prog_bar = mmcv.ProgressBar(len(dataset))
+
     for data in data_loader:
         with torch.no_grad():
             result = model(return_loss=False, **data)
+        if save_vididx:
+            vids.append(data['vid_idx'])
         results.append(result)
-
         if rank == 0:
-            # use the first key as main key to calculate the batch size
-            batch_size = len(next(iter(data.values())))
-            for _ in range(batch_size * world_size):
-                prog_bar.update()
-
-    # collect results from all ranks
-    if rank == 0:
-        print('\nStarting to collect results!')
-    if gpu_collect:
         results = collect_results_gpu(results, len(dataset))
     else:
         results = collect_results_cpu(results, len(dataset), tmpdir)
-    return results
+    vids = collect_results_gpu(vids, len(dataset))
+    if save_vididx:
+        return results, vids
+    else:
+        return results
 
 
 def collect_results_cpu(result_part, size, tmpdir=None):
     """Collect results in cpu mode.
-
     It saves the results on different gpus to 'tmpdir' and collects
     them by the rank 0 worker.
-
     Args:
         result_part (list): Results to be collected
         size (int): Result size.
         tmpdir (str): Path of directory to save the temporary results from
             different gpus under cpu mode. Default: None
-
     Returns:
         list: Ordered results.
     """
@@ -145,14 +120,11 @@ def collect_results_cpu(result_part, size, tmpdir=None):
 
 def collect_results_gpu(result_part, size):
     """Collect results in gpu mode.
-
     It encodes results to gpu tensors and use gpu communication for results
     collection.
-
     Args:
         result_part (list): Results to be collected
         size (int): Result size.
-
     Returns:
         list: Ordered results.
     """
@@ -173,7 +145,6 @@ def collect_results_gpu(result_part, size):
     ]
     # gather all result part
     dist.all_gather(part_recv_list, part_send)
-
     if rank == 0:
         part_list = []
         for recv, shape in zip(part_recv_list, shape_list):

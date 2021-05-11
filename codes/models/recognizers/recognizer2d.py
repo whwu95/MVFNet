@@ -1,7 +1,5 @@
 """recognizer2d"""
 import torch.nn as nn
-from torch.nn.functional import softmax
-
 from ..builder import RECOGNIZERS
 from .base import BaseRecognizer
 
@@ -158,23 +156,25 @@ class Recognizer2D(BaseRecognizer):
         #  imgs: [B*tem*crop*clip C H W]
         num_batch = imgs.shape[0]
         imgs = imgs.reshape((-1, self.in_channels) + imgs.shape[3:])
-        num_seg = imgs.shape[0] // num_batch
-
+        num_frames = imgs.shape[0] // num_batch
         x = self.extract_feat(imgs)
         if self.with_cls_head:
-            if self.fcn_testing:
-                # view to 3D, [120, 2048, 8, 8] -> [30, 4, 2048, 8, 8]
-                temporal_pool = imgs.shape[0] // x.shape[0]
-                x = x.reshape((-1, self.module_cfg['n_segment']//temporal_pool) + x.shape[1:])
-                x = x.transpose(1, 2)  # [30, 2048, 4, 8, 8]
-                cls_score = self.cls_head(
-                    x, num_seg//temporal_pool)  # [30 400]
-                cls_score = softmax(cls_score, 1).mean(0, keepdim=True)
+            temporal_pool = imgs.shape[0] // x.shape[0]
+            if self.module_cfg:
+                if self.fcn_testing:
+                    # view to 3D, [120, 2048, 8, 8] -> [30, 4, 2048, 8, 8]
+                    x = x.reshape(
+                        (-1, self.module_cfg['n_segment']//temporal_pool) + x.shape[1:])
+                    x = x.transpose(1, 2)  # [30, 2048, 4, 8, 8]
+                    cls_score = self.cls_head(
+                        x, self.module_cfg['n_segment']//temporal_pool)  # [30 400]
+                else:
+                    # [120 2048 8 8] ->  [30 400]
+                    cls_score = self.cls_head(
+                        x, self.module_cfg['n_segment']//temporal_pool)
             else:
-                # [120 2048 8 8]
-                temporal_pool = imgs.shape[0] // x.shape[0]
-                cls_score = self.cls_head(x, num_seg // temporal_pool)
-
+                cls_score = self.cls_head(x, num_frames // temporal_pool)
+            cls_score = self.average_clip(cls_score)
         if return_numpy:
             return cls_score.cpu().numpy()
         else:

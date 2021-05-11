@@ -206,7 +206,7 @@ def make_plain_res_layer(block, num_blocks,
         layers.append(block(num_filters, num_filters, base_filters,
                             block_type=block_type,
                             is_real_3d=is_real_3d, with_bn=with_bn))
-    return module_list(layers)
+    return ModuleList(layers)
 
 
 BLOCK_CONFIG = {

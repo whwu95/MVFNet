@@ -1,15 +1,12 @@
 """loading"""
 import os.path as osp
-
 import mmcv
 import numpy as np
-
 from ...utils import FileClient
 from ..builder import PIPELINES
 # from io import StringIO, BytesIO
 # import collections
 # from PIL import Image
-
 @PIPELINES.register_module
 class SampleFrames(object):
     """Sample frames from the video.
@@ -22,6 +19,7 @@ class SampleFrames(object):
         num_clips (int): Number of clips to be sampled.
         temporal_jitter (bool): Whether to apply temporal jittering.
     """
+
     def __init__(self,
                  clip_len,
                  frame_interval=1,
@@ -33,6 +31,7 @@ class SampleFrames(object):
         self.num_clips = num_clips
         self.temporal_jitter = temporal_jitter
         self.sth_samples = sth_samples  # for test sth-sth
+        # self.decode_type = decode_type # ['rawframes', 'opencv', 'decord', 'pyav']
 
     def _sample_clips(self, num_frames):
         """Choose frame indices for the video in training phase.
@@ -47,7 +46,6 @@ class SampleFrames(object):
         """
         ori_clip_len = self.clip_len * self.frame_interval
         avg_interval = (num_frames - ori_clip_len + 1) // self.num_clips
-
         if avg_interval > 0:
             base_offsets = np.arange(self.num_clips) * avg_interval
             clip_offsets = base_offsets + np.random.randint(
@@ -58,17 +56,15 @@ class SampleFrames(object):
                     num_frames - ori_clip_len + 1, size=self.num_clips))
         else:
             clip_offsets = np.zeros((self.num_clips, ))
-
         return clip_offsets
 
     def _test_sample_clips(self, num_frames):
         ori_clip_len = self.clip_len * self.frame_interval
         tick = (num_frames - ori_clip_len + 1) / float(self.num_clips)
-
         if self.sth_samples == 1:
             if tick > 0:
                 clip_offsets = np.array([int(tick / 2.0 + tick * x)
-                                        for x in range(self.num_clips)])
+                                         for x in range(self.num_clips)])
             else:
                 clip_offsets = np.zeros((self.num_clips, ))
         elif self.sth_samples == 2:
@@ -92,45 +88,45 @@ class SampleFrames(object):
                     list(range(self.num_clips)), avg_duration) + np.random.randint(avg_duration, size=self.num_clips)
                 clip_offsets.append(offsets)
             clip_offsets = np.stack(clip_offsets).reshape(-1)
-
         return clip_offsets
 
-    def __call__(self, results):
-        if 'total_frames' not in results:
-            # TODO: find a better way to get the total frames number for video
-            video_reader = mmcv.VideoReader(results['filename'])
-            total_frames = len(video_reader)
-            results['total_frames'] = total_frames
-        else:
-            total_frames = results['total_frames']
-
+    def _get_frame_inds(self, total_frames, results):
         if results['test_mode']:
             clip_offsets = self._test_sample_clips(total_frames)
         else:
             clip_offsets = self._sample_clips(total_frames)
-
         # size: [num_clip clip_len]
         frame_inds = clip_offsets[:, None] + np.arange(
             self.clip_len)[None, :] * self.frame_interval
-
         if self.temporal_jitter:
             perframe_offsets = np.random.randint(
                 self.frame_interval, size=self.clip_len)
             # [num_clip clip_len] + [1 clip_len]
             #  each clip add a same jitter offset
             frame_inds += perframe_offsets[None, :]
-
         # size: clip_len * num_clip
         frame_inds = np.concatenate(frame_inds)
-
         # if temporal_jitter, mabye out of range
         # frame_inds = np.mod(frame_inds, total_frames)
-        frame_inds = np.minimum(frame_inds, total_frames - 1)
+        frame_inds = np.minimum(frame_inds, total_frames - 1).astype(np.int)
+        return frame_inds
 
-        results['frame_inds'] = frame_inds.astype(np.int)
+    def __call__(self, results):
+        if 'total_frames' not in results:
+            # TODO: find a better way to get the total frames number for video
+            video_reader = mmcv.VideoReader(results['filename'])
+            # import decord
+            # video_reader = decord.VideoReader(results['filename'])
+            total_frames = len(video_reader)
+            results['total_frames'] = total_frames
+        else:
+            total_frames = results['total_frames']
+
+        results['frame_inds'] = self._get_frame_inds(total_frames, results)
         results['clip_len'] = self.clip_len
         results['frame_interval'] = self.frame_interval
         results['num_clips'] = self.num_clips
+        results['sth_samples'] = self.sth_samples
         return results
 
 
@@ -145,7 +141,7 @@ class PyAVDecode(object):
             apply multi thread processing.
     """
 
-    def __init__(self, multi_thread=False):
+    def __init__(self, multi_thread=True):
         self.multi_thread = multi_thread
 
     def __call__(self, results):
@@ -154,35 +150,35 @@ class PyAVDecode(object):
         except ImportError:
             raise ImportError('Please run "conda install av -c conda-forge" '
                               'or "pip install av" to install PyAV first.')
-
-        container = av.open(results['filename'])
-
-        img_group = list()
-
-        if self.multi_thread:
-            container.streams.video[0].thread_type = 'AUTO'
+        av.logging.set_level(5)
         if results['frame_inds'].ndim != 1:
             results['frame_inds'] = np.squeeze(results['frame_inds'])
 
-        # set max indice to make early stop
-        max_inds = max(results['frame_inds'])
-        i = 0
-        for frame in container.decode(video=0):
-            if i > max_inds + 1:
-                break
-            img_group.append(frame.to_rgb().to_ndarray())
-            i += 1
+        try:
+            container = av.open(results['filename'])
+            if self.multi_thread:
+                container.streams.video[0].thread_type = 'AUTO'
+            img_group = list()
+            # set max indice to make early stop
+            max_inds = max(results['frame_inds'])
+            i = 0
+            for frame in container.decode(video=0):
+                if i > max_inds + 1:
+                    break
+                # some other formats gray16be, bgr24, rgb24
+                img_group.append(frame.to_ndarray(format='rgb24'))
+                # img_group.append(frame.to_rgb().to_ndarray())
+                i += 1
+            container.close()
+            # the available frame in pyav may be less than its length, which may raise error
+            results['img_group'] = [img_group[i %
+                                              len(img_group)] for i in results['frame_inds']]
+            results['ori_shape'] = results['img_group'][0].shape[:2]
+        except Exception as e:
+            print("Failed to decode {} with exception: {}".format(
+                results['filename'], e))
+            return None
 
-        img_group = np.array(img_group)
-        # the available frame in pyav may be less than its length,
-        # which may raise error
-        if len(img_group) <= max_inds:
-            results['frame_inds'] = np.mod(results['frame_inds'],
-                                           len(img_group))
-
-        img_group = img_group[results['frame_inds']]
-        results['img_group'] = img_group
-        results['ori_shape'] = img_group[0].shape
         return results
 
     def __repr__(self):
@@ -196,7 +192,12 @@ class DecordDecode(object):
     Decord: https://github.com/zhreshold/decord
     Required keys are "filename" and "frame_inds",
     added or modified keys are "img_group" and "ori_shape".
+    Attributes:
+        num_threads (int): multi thread processing. 
     """
+
+    def __init__(self, num_threads=0):
+        self.num_threads = num_threads
 
     def __call__(self, results):
         try:
@@ -204,20 +205,27 @@ class DecordDecode(object):
         except ImportError:
             raise ImportError(
                 'Please run "pip install decord" to install Decord first.')
-
-        container = decord.VideoReader(results['filename'])
-        img_group = list()
-
+        decord.logging.set_level(5)
         if results['frame_inds'].ndim != 1:
             results['frame_inds'] = np.squeeze(results['frame_inds'])
-
-        for frame_idx in results['frame_inds']:
-            cur_frame = container[frame_idx].asnumpy()
-            img_group.append(cur_frame)
-            # img_group.append(cur_frame[:, :, ::-1])
-
-        results['img_group'] = img_group
-        results['ori_shape'] = img_group[0].shape
+        try:
+            container = decord.VideoReader(
+                results['filename'], num_threads=self.num_threads)
+            num_frames = len(container)  # decord num_frames
+            frame_inds = results['frame_inds']
+            # Generate frame index mapping in order
+            # frame_dict = {idx: container[idx % num_frames].asnumpy() for idx in np.unique(frame_inds)}
+            # img_group = [frame_dict[idx] for idx in frame_inds]
+            img_group = container.get_batch(
+                [idx % num_frames for idx in frame_inds]).asnumpy()
+            del container
+            results['img_group'] = img_group
+            results['ori_shape'] = img_group[0].shape
+            results['img_shape'] = img_group[0].shape
+        except Exception as e:
+            print("Failed to decode {} with exception: {}".format(
+                results['filename'], e))
+            return None
         return results
 
 
@@ -229,32 +237,33 @@ class OpenCVDecode(object):
     """
 
     def __call__(self, results):
-        container = mmcv.VideoReader(results['filename'])
-        img_group = list()
-
         if results['frame_inds'].ndim != 1:
             results['frame_inds'] = np.squeeze(results['frame_inds'])
-
-        for frame_ind in results['frame_inds']:
-            cur_frame = container[frame_ind]
-            try:
+        try:
+            container = mmcv.VideoReader(results['filename'])
+            img_group = list()
+            for frame_ind in results['frame_inds']:
                 cur_frame = container[frame_ind]
-            except IndexError:
-                print(results['filename'], frame_ind, results['total_frames'])
-
-            # last frame may be None in OpenCV
-            while isinstance(cur_frame, type(None)):
-                frame_ind -= 1
-                cur_frame = container[frame_ind]
-            img_group.append(cur_frame)
-
-        # img_group = np.array(img_group)
-        # The default channel order of OpenCV is BGR, thus we change it to RGB
-        # img_group = img_group[:, :, :, ::-1]
-        # imgs = imgs.transpose([0, 3, 1, 2])
-        results['img_group'] = img_group
-        results['ori_shape'] = img_group[0].shape
-
+                try:
+                    cur_frame = container[frame_ind]
+                except IndexError:
+                    print(results['filename'], frame_ind,
+                          results['total_frames'])
+                # last frame may be None in OpenCV
+                while isinstance(cur_frame, type(None)):
+                    frame_ind -= 1
+                    cur_frame = container[frame_ind]
+                img_group.append(cur_frame)
+            # img_group = np.array(img_group)
+            # The default channel order of OpenCV is BGR, thus we change it to RGB
+            # img_group = img_group[:, :, :, ::-1]
+            # imgs = imgs.transpose([0, 3, 1, 2])
+            results['img_group'] = img_group
+            results['ori_shape'] = img_group[0].shape
+        except Exception as e:
+            print("Failed to decode {} with exception: {}".format(
+                results['filename'], e))
+            return None
         return results
 
 
@@ -264,18 +273,16 @@ class PklLoader(object):
     Required keys are "filename" and "frame_inds",
     added or modified keys are "img_group" and "ori_shape".
     """
-    def _pil_loader(self, buf, usegray=False):
 
+    def _pil_loader(self, buf, usegray=False):
         # print(type(buf))
         if isinstance(buf, bytes):
             img = mmcv.imfrombytes(buf, 'color')
             # img = Image.open(BytesIO(buf))
-
             # tempbuff = BytesIO()
             # tempbuff.write(buf)
             # tempbuff.seek(0)
             # img = Image.open(tempbuff)
-
         # elif isinstance(buf,collections.Sequence):
         #      img = Image.open(BytesIO(buf[-1]))
         else:
@@ -289,18 +296,14 @@ class PklLoader(object):
         except ImportError:
             raise ImportError(
                 'Please run "pip install _pickle" to install _pickle first.')
-
         container = pickle.load(open(results['filename'], 'rb'))
         img_group = list()
-
         if results['frame_inds'].ndim != 1:
             results['frame_inds'] = np.squeeze(results['frame_inds'])
-
         for frame_idx in results['frame_inds']:
             cur_frame = self._pil_loader(container[frame_idx])
             img_group.append(cur_frame)
             # img_group.append(cur_frame[:, :, ::-1])
-
         results['img_group'] = img_group
         results['ori_shape'] = img_group[0].shape
         return results
@@ -311,7 +314,6 @@ class FrameSelector(object):
     """Select raw frames with given indices
     Required keys are "file_dir", "filename_tmpl" and "frame_inds",
     added or modified keys are "img_group" and "ori_shape".
-
     Attributes:
         io_backend (str): io backend where frames are store.
     """
@@ -334,12 +336,9 @@ class FrameSelector(object):
     def __call__(self, results):
         directory = results['filename']
         filename_tmpl = results['filename_tmpl']
-
         imgs = list()
-
         if results['frame_inds'].ndim != 1:
             results['frame_inds'] = np.squeeze(results['frame_inds'])
-
         for frame_idx in results['frame_inds']:
             if results['modality'] in ['RGB', 'RGBDiff']:
                 filepath = osp.join(
@@ -359,17 +358,13 @@ class FrameSelector(object):
                 raise ValueError(
                     'Not implemented yet; modality should be '
                     '["RGB", "RGBDiff", "Flow"]')
-
             imgs.extend(cur_frame)
-
             if self.backup is None:
                 self.backup = cur_frame
-
         # # [num c h w]
         # imgs = np.array(imgs)
         # imgs = imgs.transpose([0, 3, 1, 2])
         results['img_group'] = imgs
         # [h w c]
         results['ori_shape'] = imgs[0].shape
-
         return results
