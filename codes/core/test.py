@@ -12,6 +12,11 @@ from mmcv.runner import get_dist_info
 def single_gpu_test(model, data_loader, save_vididx=False):
     """Test model with a single gpu.
     This method tests model with a single gpu and displays test progress bar.
+    Args:
+        model (nn.Module): Model to be tested.
+        data_loader (nn.Dataloader): Pytorch data loader.
+    Returns:
+        list: The prediction results.
     """
     model.eval()
     results = []
@@ -37,6 +42,19 @@ def single_gpu_test(model, data_loader, save_vididx=False):
 def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=True, save_vididx=False):
     """Test model with multiple gpus.
     This method tests model with multiple gpus and collects the results
+    under two different modes: gpu and cpu modes. By setting 'gpu_collect=True'
+    it encodes results to gpu tensors and use gpu communication for results
+    collection. On cpu mode it saves the results on different gpus to 'tmpdir'
+    and collects them by the rank 0 worker.
+    Args:
+        model (nn.Module): Model to be tested.
+        data_loader (nn.Dataloader): Pytorch data loader.
+        tmpdir (str): Path of directory to save the temporary results from
+            different gpus under cpu mode. Default: None
+        gpu_collect (bool): Option to use either gpu or cpu to collect results.
+            Default: True
+    Returns:
+        list: The prediction results.
     """
     model.eval()
     results = []
@@ -53,6 +71,14 @@ def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=True, save_vidid
             vids.append(data['vid_idx'])
         results.append(result)
         if rank == 0:
+            # use the first key as main key to calculate the batch size
+            batch_size = len(next(iter(data.values())))
+            for _ in range(batch_size * world_size):
+                prog_bar.update()
+    # collect results from all ranks
+    if rank == 0:
+        print('\nStarting to collect results!')
+    if gpu_collect:
         results = collect_results_gpu(results, len(dataset))
     else:
         results = collect_results_cpu(results, len(dataset), tmpdir)

@@ -68,7 +68,6 @@ class Recognizer2D(BaseRecognizer):
                 from ..modules.local_attention import make_non_local
                 make_non_local(self.backbone, **nonlocal_cfg)
 
-
         elif backbone_name == 'MobileNetV2':
             if module_name == 'tsm':
                 from ..modules import TemporalShift
@@ -99,7 +98,6 @@ class Recognizer2D(BaseRecognizer):
                             alpha=module_cfg['alpha'],
                             share=module_cfg['share'],
                             mode=module_cfg['mode'])
-
 
     # TODO: Debug and test flow
     def _construct_2d_backbone_conv1(self, in_channels):

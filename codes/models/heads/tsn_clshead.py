@@ -22,7 +22,8 @@ class TSNClsHead(BaseHead):
         extract_feat=False,
     ):
         super(TSNClsHead, self).__init__(spatial_size, dropout_ratio,
-                                         in_channels, num_classes, init_std, extract_feat)
+                                         in_channels, num_classes, init_std,
+                                         extract_feat)
         self.spatial_type = spatial_type
         self.consensus_type = consensus_cfg['type']
         self.temporal_feature_size = temporal_feature_size
