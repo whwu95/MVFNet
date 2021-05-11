@@ -130,6 +130,7 @@ class SampleFrames(object):
         return results
 
 
+
 @PIPELINES.register_module
 class PyAVDecode(object):
     """Using pyav to decode the video.
@@ -195,6 +196,8 @@ class DecordDecode(object):
     Attributes:
         num_threads (int): multi thread processing. 
     """
+    def __init__(self, num_threads=0):
+        self.num_threads = num_threads
 
     def __init__(self, num_threads=0):
         self.num_threads = num_threads
