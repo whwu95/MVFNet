@@ -78,6 +78,16 @@ This implementation supports multi-gpu, `DistributedDataParallel` training, whic
 bash scripts/dist_train_recognizer.sh configs/MVFNet/K400/mvf_kinetics400_2d_rgb_r50_dense.py 8
 ```
 
+- We also provide the script to train MVFNet on Kinetics400 with multiple machines (e.g., 2 machines and 16 GPUs).
+```sh
+# For first machine, --master_addr is the ip of your first machine
+bash scripts/dist_train_multinode_1.sh configs/MVFNet/K400/mvf_kinetics400_2d_rgb_r50_dense.py 8
+```
+```sh
+# For second machine, --master_addr is still the ip of your first machine
+bash scripts/dist_train_multinode_2.sh configs/MVFNet/K400/mvf_kinetics400_2d_rgb_r50_dense.py 8
+```
+
 ## Acknowledgements
 We especially thank the contributors of the [mmaction](https://github.com/open-mmlab/mmaction) codebase for providing helpful code.
 
