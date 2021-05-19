@@ -89,7 +89,7 @@ bash scripts/dist_train_multinode_2.sh configs/MVFNet/K400/mvf_kinetics400_2d_rg
 ```
 
 ## Acknowledgements
-We especially thank the contributors of the [mmaction](https://github.com/open-mmlab/mmaction) codebase for providing helpful code.
+We especially thank the contributors of the [MMAction](https://github.com/open-mmlab/mmaction) and [MMAction2](https://github.com/open-mmlab/mmaction2) codebase for providing helpful code.
 
 
 ## License
