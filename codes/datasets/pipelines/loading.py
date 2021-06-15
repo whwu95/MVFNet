@@ -2,8 +2,10 @@
 import os.path as osp
 import mmcv
 import numpy as np
-from ...utils import FileClient
+import math
+from ...utils import FileClient, get_root_logger
 from ..builder import PIPELINES
+logger = get_root_logger()
 # from io import StringIO, BytesIO
 # import collections
 # from PIL import Image
@@ -130,7 +132,6 @@ class SampleFrames(object):
         return results
 
 
-
 @PIPELINES.register_module
 class PyAVDecode(object):
     """Using pyav to decode the video.
@@ -142,8 +143,22 @@ class PyAVDecode(object):
             apply multi thread processing.
     """
 
-    def __init__(self, multi_thread=True):
+    def __init__(self, multi_thread=True, accurate=False):
         self.multi_thread = multi_thread
+        self.accurate = accurate
+
+    def frame_generator(self, container, stream):
+        """frame generator
+        Args:
+            container ([type]): [description]
+            stream ([type]): [description]
+        Returns:
+            [type]: [description]
+        """
+        for packet in container.demux(stream):
+            for frame in packet.decode():
+                if frame:
+                    return frame.to_ndarray(format='rgb24')
 
     def __call__(self, results):
         try:
@@ -157,26 +172,56 @@ class PyAVDecode(object):
 
         try:
             container = av.open(results['filename'])
+            stream = container.streams.video[0]
             if self.multi_thread:
-                container.streams.video[0].thread_type = 'AUTO'
-            img_group = list()
-            # set max indice to make early stop
+                stream.thread_type = 'AUTO'
+            ## check duration
+            try:
+                duration = stream.duration * stream.time_base
+            except TypeError:
+                duration = container.duration / av.time_base
+            if duration <= 0:
+                raise IOError("Video stream 0 in {} has zero length.".format(
+                    results['filename']))
+
+            frame_count = stream.frames
             max_inds = max(results['frame_inds'])
-            i = 0
-            for frame in container.decode(video=0):
-                if i > max_inds + 1:
-                    break
-                # some other formats gray16be, bgr24, rgb24
-                img_group.append(frame.to_ndarray(format='rgb24'))
-                # img_group.append(frame.to_rgb().to_ndarray())
-                i += 1
+            if max_inds > frame_count:
+                frame_inds = [idx %
+                              frame_count for idx in results['frame_inds']]
+            else:
+                frame_inds = results['frame_inds']
+            img_group = list()
+            if self.accurate:  # for accurate seeking
+                i = 0
+                for frame in container.decode(video=0):
+                    # set max indice to make early stop
+                    if i > max_inds + 1:
+                        break
+                    # some other formats gray16be, bgr24, rgb24
+                    img_group.append(frame.to_ndarray(format='rgb24'))
+                    i += 1
+
+                # the available frame in pyav may be less than its length, which may raise error
+                results['img_group'] = [img_group[i %
+                                                  len(img_group)] for i in results['frame_inds']]
+            else:   # for fast seeking (not accurate)
+                for idx in frame_inds.tolist():
+                    pts_scale = stream.average_rate * stream.time_base
+                    frame_pts = int(idx / pts_scale)
+                    container.seek(frame_pts, any_frame=False,
+                                   backward=True, stream=stream)
+                    frame = self.frame_generator(container, stream)
+                    if frame is not None:
+                        img_group.append(frame)
+                    else:
+                        img_group.append(img_group[-1])
+                results['img_group'] = img_group
             container.close()
-            # the available frame in pyav may be less than its length, which may raise error
-            results['img_group'] = [img_group[i %
-                                              len(img_group)] for i in results['frame_inds']]
+
             results['ori_shape'] = results['img_group'][0].shape[:2]
         except Exception as e:
-            print("Failed to decode {} with exception: {}".format(
+            logger.info("Failed to decode {} with exception: {}".format(
                 results['filename'], e))
             return None
 
@@ -188,19 +233,70 @@ class PyAVDecode(object):
 
 
 @PIPELINES.register_module
+class PIMSDecode(object):
+    """Using PIMS to decode the video.
+    PIMS: https://github.com/soft-matter/pims
+    Required keys are "filename" and "frame_inds",
+    added or modified keys are "img_group" and "ori_shape".
+    Attributes:
+        multi_thread (bool): If set to True, it will
+            apply multi thread processing.
+    """
+
+    def __init__(self, indexed=True):
+        self.indexed = indexed
+
+    def __call__(self, results):
+        try:
+            import pims
+        except ImportError:
+            raise ImportError('Please run "conda install pims -c conda-forge" '
+                              'or "pip install pims" to install pims first.')
+        if results['frame_inds'].ndim != 1:
+            results['frame_inds'] = np.squeeze(results['frame_inds'])
+
+        try:
+            if self.indexed:  # faster than pyav seek (accurate)
+                video = pims.PyAVReaderIndexed(results['filename'])
+            else:
+                # faster, but something wrong with pytorch dataloader
+                video = pims.PyAVReaderTimed(results['filename'])
+
+            frame_count = len(video)
+            max_inds = max(results['frame_inds'])
+            if max_inds > frame_count:
+                frame_inds = [idx %
+                              frame_count for idx in results['frame_inds']]
+            else:
+                frame_inds = results['frame_inds']
+            img_group = video[frame_inds]
+            results['img_group'] = img_group
+            results['ori_shape'] = results['img_group'][0].shape[:2]
+        except Exception as e:
+            logger.info("Failed to decode {} with exception: {}".format(
+                results['filename'], e))
+            return None
+
+        return results
+
+    def __repr__(self):
+        repr_str = self.__class__.__name__
+
+
+@PIPELINES.register_module
 class DecordDecode(object):
     """Using decord to decode the video.
     Decord: https://github.com/zhreshold/decord
     Required keys are "filename" and "frame_inds",
     added or modified keys are "img_group" and "ori_shape".
     Attributes:
-        num_threads (int): multi thread processing. 
+        num_threads (int): multi thread processing.  
+        accurate (bool): random access patterns  
     """
-    def __init__(self, num_threads=0):
-        self.num_threads = num_threads
 
-    def __init__(self, num_threads=0):
+    def __init__(self, num_threads=0, accurate=True):
         self.num_threads = num_threads
+        self.accurate = accurate
 
     def __call__(self, results):
         try:
@@ -215,18 +311,28 @@ class DecordDecode(object):
             container = decord.VideoReader(
                 results['filename'], num_threads=self.num_threads)
             num_frames = len(container)  # decord num_frames
-            frame_inds = results['frame_inds']
+            frame_inds = [idx % num_frames for idx in results['frame_inds']]
             # Generate frame index mapping in order
             # frame_dict = {idx: container[idx % num_frames].asnumpy() for idx in np.unique(frame_inds)}
             # img_group = [frame_dict[idx] for idx in frame_inds]
-            img_group = container.get_batch(
-                [idx % num_frames for idx in frame_inds]).asnumpy()
+
+            if self.accurate:
+                img_group = container.get_batch(frame_inds).asnumpy()
+            else:
+                # faster, however always return I-FRAME
+                container.seek(0)
+                img_group = []
+                for idx in frame_inds:
+                    container.seek(idx)
+                    frame = container.next()
+                    img_group.append(frame.asnumpy())
+
             del container
             results['img_group'] = img_group
             results['ori_shape'] = img_group[0].shape
             results['img_shape'] = img_group[0].shape
         except Exception as e:
-            print("Failed to decode {} with exception: {}".format(
+            logger.info("Failed to decode {} with exception: {}".format(
                 results['filename'], e))
             return None
         return results
@@ -250,8 +356,8 @@ class OpenCVDecode(object):
                 try:
                     cur_frame = container[frame_ind]
                 except IndexError:
-                    print(results['filename'], frame_ind,
-                          results['total_frames'])
+                    logger.info(results['filename'],
+                                frame_ind, results['total_frames'])
                 # last frame may be None in OpenCV
                 while isinstance(cur_frame, type(None)):
                     frame_ind -= 1
@@ -264,7 +370,7 @@ class OpenCVDecode(object):
             results['img_group'] = img_group
             results['ori_shape'] = img_group[0].shape
         except Exception as e:
-            print("Failed to decode {} with exception: {}".format(
+            logger.info("Failed to decode {} with exception: {}".format(
                 results['filename'], e))
             return None
         return results
@@ -289,7 +395,7 @@ class PklLoader(object):
         # elif isinstance(buf,collections.Sequence):
         #      img = Image.open(BytesIO(buf[-1]))
         else:
-            print('Maybe something wrong')
+            logger.info('Maybe something wrong')
         # return img.convert('L') if usegray else img.convert('RGB')
         return np.array(img)
 
@@ -331,7 +437,7 @@ class FrameSelector(object):
         try:
             cur_frame = mmcv.imfrombytes(value_buf, flag)
         except Exception:
-            print('imfrombytes error, reload backup')
+            logger.info('imfrombytes error, reload backup')
             cur_frame = self.backup
         # cur_frame = mmcv.imread(filepath)
         return cur_frame
