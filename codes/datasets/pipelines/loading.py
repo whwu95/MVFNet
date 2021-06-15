@@ -2,7 +2,6 @@
 import os.path as osp
 import mmcv
 import numpy as np
-import math
 from ...utils import FileClient, get_root_logger
 from ..builder import PIPELINES
 logger = get_root_logger()
@@ -175,7 +174,7 @@ class PyAVDecode(object):
             stream = container.streams.video[0]
             if self.multi_thread:
                 stream.thread_type = 'AUTO'
-            ## check duration
+            # check duration
             try:
                 duration = stream.duration * stream.time_base
             except TypeError:
@@ -279,9 +278,6 @@ class PIMSDecode(object):
 
         return results
 
-    def __repr__(self):
-        repr_str = self.__class__.__name__
-
 
 @PIPELINES.register_module
 class DecordDecode(object):
@@ -290,8 +286,8 @@ class DecordDecode(object):
     Required keys are "filename" and "frame_inds",
     added or modified keys are "img_group" and "ori_shape".
     Attributes:
-        num_threads (int): multi thread processing.  
-        accurate (bool): random access patterns  
+        num_threads (int): multi thread processing.
+        accurate (bool): random access patterns
     """
 
     def __init__(self, num_threads=0, accurate=True):
