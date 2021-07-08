@@ -13,7 +13,7 @@ Your are expected to prepare data for [Kinetics-400](https://deepmind.com/resear
 
 
 ## Dataset Processing
-Since the original VideoDataloader of MMAction requires [decord](https://github.com/zhreshold/decord) for efficient video loading which is non-trivial to compile, this repo only supports **raw frame** format of videos. Therefore, you have to extract frames from raw videos. We will find another libaries and support VideoLoader soon.
+This repo supports **raw frame** format of videos. Therefore, you can extract frames from raw videos. Also, we support a fast **VideoLoader**, which can be found at [Fast PyAVDecode](https://github.com/whwu95/MVFNet/blob/83dcb881c2552524d3f861a38133fee44449a979/codes/datasets/pipelines/loading.py#L135).
 
 
 ### Resize original videos (Optional)
